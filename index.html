@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>VoiceBot UI</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+
+
+</head>
+<body>
+  <div class="container">
+    <h1>🎙️ VoiceBot</h1>
+    
+
+    <button id="recordBtn">🎤 Start Aufnahme</button>
+
+    <div class="section">
+      <h2>User Input</h2>
+      <div class="user-input-container">
+        <img src="humanAvatar.jpg" alt="User Avatar" class="avatar" /> <!-- User Avatar -->
+        <div id="userInput">...</div>
+      </div>
+    </div>
+
+
+    <div class="section bot-section">
+      <h2>Bot Response</h2>
+      <div class="bot-response-container">
+        <img src="voiceBotavatar.png" alt="Voice Bot Avatar" class="avatar" />
+        <div id="botResponse">...</div>
+      </div>
+    </div>
+
+    <button id="playBtn">🔊 Antwort anhören</button>
+
+    <div class="settings">
+      <button id="settingsBtn">⚙️ Einstellungen</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
