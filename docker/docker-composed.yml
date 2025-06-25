@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  voicebot-backend:
+    build: .
+    container_name: voicebot-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=false
+      - USE_GPU=false  # Set to true if using GPU
+      - WHISPER_MODEL_SIZE=base
+      - USE_COQUI_TTS=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  voicebot-frontend:
+    image: nginx:alpine
+    container_name: voicebot-frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - voicebot-backend
+    restart: unless-stopped
+
+  # Optional: GPU support (uncomment if using GPU)
+  # voicebot-backend-gpu:
+  #   build: .
+  #   container_name: voicebot-backend-gpu
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - ./models:/app/models
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #     - ./temp:/app/temp
+  #   environment:
+  #     - HOST=0.0.0.0
+  #     - PORT=8000
+  #     - USE_GPU=true
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   restart: unless-stopped
