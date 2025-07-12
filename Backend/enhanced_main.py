@@ -130,6 +130,10 @@ class ImprovedRAGService:
             'marktplatz', 'standesamt', 'ordnungsamt', 'einwohnermeldeamt',
             'meldeamt', 'büro', 'office', 'building',
             
+            # Family & Children
+            'kinderplatz', 'spielplatz', 'kindergarten', 'kita', 'kinder',
+            'playground', 'daycare', 'familie', 'family',
+            
             # Transport & Parking
             'parken', 'parkausweis', 'parkplatz', 'parking', 'fahrzeug',
             'kvv', 'verkehr', 'transport', 'bus', 'bahn', 'ticket',
@@ -151,7 +155,14 @@ class ImprovedRAGService:
             
             # Actions
             'hilfe', 'help', 'unterstützung', 'information', 'info',
-            'frage', 'question', 'antwort', 'answer'
+            'frage', 'question', 'antwort', 'answer',
+            
+            # Waste management
+            'abfall', 'müll', 'entsorgung', 'recycling', 'sperrmüll',
+            'gelber sack', 'biomüll', 'restmüll', 'papier', 'glas',
+            
+            # Weather (even though not in KB, for filtering)
+            'wetter', 'weather', 'temperatur', 'regen', 'sonne'
         ]
         
         for keyword in all_keywords:
@@ -160,8 +171,8 @@ class ImprovedRAGService:
         
         return list(set(keywords))  # Remove duplicates
     
-    def search(self, query: str, max_results: int = 5) -> List[Dict]:
-        """Enhanced search with detailed scoring"""
+    def search(self, query: str, max_results: int = 10) -> List[Dict]:
+        """Enhanced search with detailed scoring - returns more results for better selection"""
         query_lower = query.lower()
         results = []
         
@@ -173,7 +184,6 @@ class ImprovedRAGService:
             # Exact phrase match (highest score)
             if query_lower in entry['text']:
                 score += 30
-                logger.debug(f"📍 Exact phrase match in entry {entry['index']}")
             
             # Keyword matching
             query_keywords = self.extract_enhanced_keywords(query)
@@ -182,7 +192,6 @@ class ImprovedRAGService:
             
             if matching_keywords:
                 score += len(matching_keywords) * 15
-                logger.debug(f"🎯 Keyword matches in entry {entry['index']}: {matching_keywords}")
             
             # Individual word matching
             query_words = [w for w in query_lower.split() if len(w) > 2]
@@ -221,23 +230,87 @@ class ImprovedRAGService:
         return results[:max_results]
     
     def generate_response(self, query: str) -> str:
-        """Generate response with detailed logging"""
+        """Generate response ONLY from knowledge base - no mock responses"""
         logger.info(f"🧠 Generating response for: {query}")
         
-        search_results = self.search(query)
+        # Search the knowledge base
+        search_results = self.search(query, max_results=10)  # Get more results to choose from
         
         if not search_results:
-            logger.info("❌ No search results found, using default response")
-            return self.get_default_response(query)
+            logger.info("❌ No search results found in knowledge base")
+            return "Entschuldigung, ich konnte keine relevanten Informationen in der Wissensdatenbank finden."
         
-        # Use best match
-        best_match = search_results[0]
-        content = best_match['content']
+        # DEBUG: Log top 5 results to see what we're getting
+        logger.info("🔍 Top search results:")
+        for i, result in enumerate(search_results[:5]):
+            logger.info(f"   {i+1}. Score: {result['score']}, Keywords: {result['keywords']}")
+            logger.info(f"      Snippet: {result['snippet'][:100]}...")
         
-        logger.info(f"✅ Using best match with score: {best_match['score']}")
-        logger.info(f"🎯 Matching keywords: {best_match['keywords']}")
+        # Find the best relevant match
+        best_match = None
+        for result in search_results:
+            content_text = self.extract_content_text(result['content'])
+            
+            # Skip if content is too generic or irrelevant
+            if self.is_relevant_content(query, content_text, result['keywords']):
+                best_match = result
+                logger.info(f"✅ Selected relevant match with score: {result['score']}")
+                logger.info(f"🎯 Matching keywords: {result['keywords']}")
+                break
         
-        # Extract response text
+        if not best_match:
+            logger.info("❌ No relevant content found in search results")
+            return "Entschuldigung, ich konnte keine passenden Informationen zu Ihrer Anfrage finden."
+        
+        # Extract and clean response text
+        response_text = self.extract_content_text(best_match['content'])
+        
+        if not response_text or len(response_text.strip()) < 20:
+            logger.warning("⚠️ Extracted content too short")
+            return "Entschuldigung, die gefundenen Informationen sind unvollständig."
+        
+        # Clean and format response
+        response_text = self.clean_response_text(response_text)
+        
+        # Make sure it's not the same generic response every time
+        if "studierende" in response_text.lower() and "studierende" not in query.lower():
+            logger.info("❌ Content not relevant to query, trying next result")
+            # Try second best result
+            if len(search_results) > 1:
+                second_match = search_results[1]
+                response_text = self.extract_content_text(second_match['content'])
+                response_text = self.clean_response_text(response_text)
+            else:
+                return "Entschuldigung, die gefundenen Informationen passen nicht zu Ihrer Anfrage."
+        
+        logger.info(f"✅ Generated response ({len(response_text)} chars): {response_text[:100]}...")
+        return response_text
+    
+    def is_relevant_content(self, query: str, content: str, keywords: List[str]) -> bool:
+        """Check if content is relevant to the query"""
+        query_lower = query.lower()
+        content_lower = content.lower()
+        
+        # Skip content that starts with generic introductions if query is specific
+        if content_lower.startswith('einleitung') and len(query_lower) > 10:
+            return False
+        
+        # Check if any query words appear in content
+        query_words = [w for w in query_lower.split() if len(w) > 2]
+        content_words = content_lower.split()
+        
+        word_matches = 0
+        for query_word in query_words:
+            for content_word in content_words:
+                if query_word in content_word:
+                    word_matches += 1
+                    break
+        
+        # Require at least 2 word matches or strong keyword overlap
+        return word_matches >= 2 or len(keywords) >= 3
+    
+    def extract_content_text(self, content) -> str:
+        """Extract meaningful text from content object"""
         response_text = ""
         
         if isinstance(content, dict):
@@ -250,7 +323,7 @@ class ImprovedRAGService:
             for field in content_fields:
                 if field in content and content[field]:
                     response_text = str(content[field])
-                    logger.info(f"📝 Using content from field: {field}")
+                    logger.debug(f"📝 Using content from field: {field}")
                     break
             
             # If no specific field found, combine relevant text
@@ -260,60 +333,42 @@ class ImprovedRAGService:
                     if isinstance(value, str) and len(value) > 15:
                         text_parts.append(value)
                 response_text = " ".join(text_parts[:2])  # Use first 2 relevant parts
-                logger.info(f"📝 Combined content from multiple fields")
-        
+                logger.debug(f"📝 Combined content from multiple fields")
         else:
             response_text = str(content)
         
-        # Clean up the response
-        response_text = response_text.strip()
-        
-        # Remove HTML/XML tags
-        import re
-        response_text = re.sub(r'<[^>]+>', '', response_text)
-        
-        # Remove extra whitespace
-        response_text = re.sub(r'\s+', ' ', response_text)
-        
-        # Limit length for spoken response
-        if len(response_text) > 300:
-            sentences = response_text.split('.')
-            response_text = '. '.join(sentences[:2]) + '.'
-        
-        if not response_text or len(response_text.strip()) < 10:
-            logger.warning("⚠️ Extracted content too short, using default")
-            return self.get_default_response(query)
-        
-        logger.info(f"✅ Generated response ({len(response_text)} chars): {response_text[:100]}...")
         return response_text
     
-    def get_default_response(self, query: str) -> str:
-        """Enhanced default responses for common questions"""
-        query_lower = query.lower()
+    def clean_response_text(self, text: str) -> str:
+        """Clean and format response text"""
+        import re
         
-        # Greetings and general questions about Karlsruhe
-        if any(word in query_lower for word in ['hallo', 'hello', 'hi', 'guten tag']):
-            if 'karlsruhe' in query_lower:
-                return "Hallo! Karlsruhe ist eine wunderschöne Stadt in Baden-Württemberg mit etwa 310.000 Einwohnern. Ich kann Ihnen bei Fragen zu städtischen Dienstleistungen helfen. Was möchten Sie wissen?"
-            return "Hallo! Ich bin Ihr VoiceBot für Karlsruhe. Wie kann ich Ihnen mit städtischen Dienstleistungen helfen?"
+        # Clean up the response
+        text = text.strip()
         
-        # About Karlsruhe
-        if 'karlsruhe' in query_lower and any(word in query_lower for word in ['was', 'über', 'info', 'sagen', 'erzähl']):
-            return "Karlsruhe ist die zweitgrößte Stadt Baden-Württembergs und bekannt als 'Fächerstadt' wegen ihres einzigartigen Stadtplans. Hier finden Sie das Bürgerbüro, verschiedene Ämter und viele städtische Dienstleistungen. Was interessiert Sie speziell?"
+        # Remove HTML/XML tags
+        text = re.sub(r'<[^>]+>', '', text)
         
-        # Thanks  
-        if any(word in query_lower for word in ['danke', 'vielen dank', 'thank you']):
-            return "Gerne! Bei weiteren Fragen zu Karlsruher Dienstleistungen stehe ich Ihnen zur Verfügung."
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text)
         
-        # Opening hours
-        if any(word in query_lower for word in ['öffnungszeit', 'geöffnet', 'opening hours']):
-            return "Das Bürgerbüro Karlsruhe hat folgende Öffnungszeiten: Montag bis Freitag 8:00-18:00 Uhr, Samstag 9:00-12:00 Uhr."
+        # Remove "Einleitung" if it's at the start and there's more content
+        if text.startswith('Einleitung') and len(text) > 20:
+            text = text[10:].strip()
         
-        # General help
-        return "Entschuldigung, dazu habe ich keine spezifischen Informationen gefunden. Das Bürgerbüro Karlsruhe hilft Ihnen gerne weiter: Telefon 0721/133-3333 oder besuchen Sie karlsruhe.de."
-# Initialize RAG service
-rag_service = None
-
+        # Remove common document artifacts
+        text = re.sub(r'^(Einleitung|Introduction|Übersicht|Overview)\s*', '', text)
+        
+        # Limit length for spoken response but keep it meaningful
+        if len(text) > 400:
+            sentences = text.split('.')
+            # Take first 2-3 sentences depending on length
+            if len(sentences[0]) > 200:
+                text = sentences[0] + '.'
+            else:
+                text = '. '.join(sentences[:2]) + '.'
+        
+        return text
 @app.on_event("startup")
 async def startup_event():
     global whisper_model, tts_engine, rag_service, knowledge_base
@@ -357,6 +412,29 @@ async def startup_event():
         logger.info("✅ TTS loaded!")
     except Exception as e:
         logger.error(f"❌ TTS failed: {e}")
+
+@app.get("/debug-search")
+async def debug_search(q: str = "test"):
+    """Debug search results"""
+    if not rag_service:
+        return {"error": "RAG service not available"}
+    
+    results = rag_service.search(q, max_results=10)
+    
+    return {
+        "query": q,
+        "total_results": len(results),
+        "results": [
+            {
+                "score": r['score'],
+                "keywords": r['keywords'],
+                "snippet": r['snippet'][:200],
+                "content_type": type(r['content']).__name__,
+                "content_keys": list(r['content'].keys()) if isinstance(r['content'], dict) else "not_dict"
+            }
+            for r in results
+        ]
+    }
 
 @app.get("/")
 async def root():
